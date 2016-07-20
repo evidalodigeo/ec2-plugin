@@ -29,7 +29,7 @@ package hudson.plugins.ec2;
  * @author Kohsuke Kawaguchi
  */
 public enum InstanceState {
-    PENDING, RUNNING, SHUTTING_DOWN, TERMINATED, STOPPING, STOPPED;
+    PENDING, RUNNING, RUNNING_CHECKS_OK, RUNNING_CHECKS_KO, RUNNING_CHECKS_PENDING, SHUTTING_DOWN, TERMINATED, STOPPING, STOPPED;
 
     public String getCode() {
         return name().toLowerCase().replace('_', '-');

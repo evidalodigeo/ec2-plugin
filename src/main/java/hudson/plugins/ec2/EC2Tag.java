@@ -23,15 +23,14 @@
  */
 package hudson.plugins.ec2;
 
-import hudson.model.Descriptor;
-import hudson.model.AbstractDescribableImpl;
+import com.amazonaws.services.ec2.model.Tag;
 import hudson.Extension;
+import hudson.model.AbstractDescribableImpl;
+import hudson.model.Descriptor;
 import org.kohsuke.stapler.DataBoundConstructor;
 
-import java.util.List;
 import java.util.LinkedList;
-
-import com.amazonaws.services.ec2.model.Tag;
+import java.util.List;
 
 public class EC2Tag extends AbstractDescribableImpl<EC2Tag> {
     private final String name;
@@ -40,7 +39,7 @@ public class EC2Tag extends AbstractDescribableImpl<EC2Tag> {
     /**
      * Tag name for the specific jenkings slave type tag, used to identify the EC2 instances provisioned by this plugin.
      */
-    public static final String TAG_NAME_JENKINS_SLAVE_TYPE = "jenkins_slave_type";
+    public static final String TAG_NAME_JENKINS_SLAVE_TYPE = "jenkins_slave_type_OF";
 
     @DataBoundConstructor
     public EC2Tag(String name, String value) {

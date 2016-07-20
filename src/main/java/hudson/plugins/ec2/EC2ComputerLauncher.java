@@ -23,22 +23,20 @@
  */
 package hudson.plugins.ec2;
 
-import hudson.model.TaskListener;
-import hudson.slaves.ComputerLauncher;
-import hudson.slaves.SlaveComputer;
-
-import java.io.IOException;
-import java.io.PrintStream;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.services.ec2.AmazonEC2;
 import com.amazonaws.services.ec2.model.Instance;
 import com.amazonaws.services.ec2.model.StartInstancesRequest;
 import com.amazonaws.services.ec2.model.StartInstancesResult;
+import hudson.model.TaskListener;
+import hudson.slaves.ComputerLauncher;
+import hudson.slaves.SlaveComputer;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * {@link ComputerLauncher} for EC2 that waits for the instance to really come up before proceeding to the real
@@ -48,6 +46,18 @@ import com.amazonaws.services.ec2.model.StartInstancesResult;
  */
 public abstract class EC2ComputerLauncher extends ComputerLauncher {
     private static final Logger LOGGER = Logger.getLogger(EC2ComputerLauncher.class.getName());
+
+    private static final String RUNNING_INSTANCE_WITH_CHECKS = "jenkins.ec2.instanceChecks";
+
+    private static boolean waitUntilRunningInstanceWithChecks = false;
+
+    static  {
+        String prop = System.getProperty(RUNNING_INSTANCE_WITH_CHECKS);
+        if (prop != null) {
+            waitUntilRunningInstanceWithChecks = Boolean.parseBoolean(prop);
+        }
+
+    }
 
     @Override
     public void launch(SlaveComputer slaveComputer, TaskListener listener) {
@@ -76,8 +86,10 @@ public abstract class EC2ComputerLauncher extends ComputerLauncher {
             final String baseMsg = "Node " + computer.getName() + "(" + computer.getInstanceId() + ")";
             String msg;
 
+
             OUTER: while (true) {
-                switch (computer.getState()) {
+                InstanceStateDetails stateDetails = computer.getState(waitUntilRunningInstanceWithChecks);
+                switch (stateDetails.getState()) {
                 case PENDING:
                     msg = baseMsg + " is still pending/launching, waiting 5s";
                     break;
@@ -88,6 +100,22 @@ public abstract class EC2ComputerLauncher extends ComputerLauncher {
                     msg = baseMsg + " is ready";
                     ((EC2Computer) slaveComputer).getCloud().log(LOGGER, Level.FINER, listener, msg);
                     break OUTER;
+                case RUNNING_CHECKS_OK:
+                    msg = baseMsg + " is ready and checks ok, waiting 15s and GO!";
+                    ((EC2Computer) computer).getCloud().log(LOGGER, Level.FINER, listener, msg);
+                    ((EC2Computer) computer).getCloud().log(LOGGER, Level.FINER, listener, stateDetails.toString());
+                    Thread.sleep(15000);
+                    break OUTER;
+                case RUNNING_CHECKS_KO:
+                    msg = baseMsg + " is Running but checks failed, going on but check your instance in AWS";
+                    ((EC2Computer) computer).getCloud().log(LOGGER, Level.FINER, listener, msg);
+                    ((EC2Computer) computer).getCloud().log(LOGGER, Level.FINER, listener, stateDetails.toString());
+                    break OUTER;
+                case RUNNING_CHECKS_PENDING:
+                    msg = baseMsg + " is Running but checks are still pending to finish, waiting 5s";
+                    ((EC2Computer) computer).getCloud().log(LOGGER, Level.FINER, listener, msg);
+                    ((EC2Computer) computer).getCloud().log(LOGGER, Level.FINER, listener, stateDetails.toString());
+                    break;
                 case STOPPED:
                     msg = baseMsg + " is stopped, sending start request";
                     ((EC2Computer) slaveComputer).getCloud().log(LOGGER, Level.INFO, listener, msg);
@@ -130,6 +158,7 @@ public abstract class EC2ComputerLauncher extends ComputerLauncher {
         }
 
     }
+
 
     /**
      * Stage 2 of the launch. Called after the EC2 instance comes up.
