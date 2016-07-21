@@ -335,7 +335,7 @@ public abstract class EC2Cloud extends Cloud {
      * @param template If left null, then all instances are counted.
      */
     private int countCurrentEC2Slaves(SlaveTemplate template) throws AmazonClientException {
-        LOGGER.log(Level.FINE, "Counting current slaves: " + (template != null ? (" AMI: " + template.getAmi()) : " All AMIS"));
+        LOGGER.log(Level.FINE, "Counting current slaves: " + (template != null ? (" AMI: " + template.getAmi() + ", description: " + template.description) : " All AMIS"));
         int n = 0;
         String description = template != null ? template.description : null;
         Set<String> instanceId = new HashSet();
@@ -373,6 +373,7 @@ public abstract class EC2Cloud extends Cloud {
         DescribeSpotInstanceRequestsRequest dsir = new DescribeSpotInstanceRequestsRequest().withFilters(filters);
         try {
             sirs = connect().describeSpotInstanceRequests(dsir).getSpotInstanceRequests();
+            LOGGER.log(Level.FINEST, "Found number spot requests: " + sirs.size() + ", for: " + description);
         } catch (Exception ex) {
             // Some ec2 implementations don't implement spot requests (Eucalyptus)
             LOGGER.log(Level.FINEST, "Describe spot instance requests failed", ex);
@@ -383,9 +384,9 @@ public abstract class EC2Cloud extends Cloud {
             for (SpotInstanceRequest sir : sirs) {
                 sirSet.add(sir);
                 if (sir.getState().equals("open") || sir.getState().equals("active")) {
-                    LOGGER.log(Level.FINE, "Spot instance request found: " + sir.getSpotInstanceRequestId() + " AMI: "
-                            + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
                     if (!instanceId.contains(sir.getInstanceId())) {
+                        LOGGER.log(Level.FINE, "Spot instance request found: " + sir.getSpotInstanceRequestId() + " AMI: "
+                                + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
                         instanceId.add(sir.getInstanceId());
                         n++;
                     }
@@ -431,13 +432,28 @@ public abstract class EC2Cloud extends Cloud {
             }
             sirSet.add(sir);
             if (sir.getState().equals("open") || sir.getState().equals("active")) {
-                if (!instanceId.contains(sir.getInstanceId())) {
-                    LOGGER.log(Level.FINE, "Spot instance request found (from node): " + sir.getSpotInstanceRequestId() + " AMI: "
-                            + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
-                    instanceId.add(sir.getInstanceId());
-                    n++;
+                if (template != null) {
+                    List<Tag> instanceTags = sir.getTags();
+                    for (Tag tag : instanceTags) {
+                        if (StringUtils.equals(tag.getKey(), EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE) && StringUtils.equals(tag.getValue(), getSlaveTypeTagValue(EC2_SLAVE_TYPE_SPOT, template.description)) && sir.getLaunchSpecification().getImageId().equals(template.getAmi())) {
+                            LOGGER.log(Level.FINE, "Spot instance request found (from node): " + sir.getSpotInstanceRequestId() + " AMI: "
+                                    + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
+                            if (!instanceId.contains(sir.getInstanceId())) {
+                                LOGGER.log(Level.FINE, "Spot instance request found (from node): " + sir.getSpotInstanceRequestId() + " AMI: "
+                                        + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
+                                instanceId.add(sir.getInstanceId());
+                                n++;
+                            }
+                        }
+                    }
+                } else {
+                    if (!instanceId.contains(sir.getInstanceId())) {
+                        LOGGER.log(Level.FINE, "Spot instance request found (from node): " + sir.getSpotInstanceRequestId() + " AMI: "
+                                + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
+                        instanceId.add(sir.getInstanceId());
+                        n++;
+                    }
                 }
-
             }
         }
 
