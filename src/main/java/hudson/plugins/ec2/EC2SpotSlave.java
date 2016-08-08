@@ -111,7 +111,7 @@ public final class EC2SpotSlave extends EC2AbstractSlave {
      *
      * @return SpotInstanceRequest object for this slave, or null
      */
-    private SpotInstanceRequest getSpotRequest() {
+    public SpotInstanceRequest getSpotRequest() {
 
         if (needSpotRequestRefresh()) {
             AmazonEC2 ec2 = getCloud().connect();
@@ -136,13 +136,15 @@ public final class EC2SpotSlave extends EC2AbstractSlave {
                 return null;
             }
             spotInstanceRequest = siRequests.get(0);
+            this.spotUpdateTimestamp = System.currentTimeMillis();
+            LOGGER.log(Level.FINEST, "Refreshed Spot Request Status : [" + this.spotInstanceRequestId + "]");
         }
 
         return spotInstanceRequest;
     }
 
     private boolean needSpotRequestRefresh() {
-        return spotInstanceRequest == null || System.currentTimeMillis() - spotUpdateTimestamp > 15000; //update every 15 seconds
+        return spotInstanceRequest == null || System.currentTimeMillis() - spotUpdateTimestamp > 30000; //update every 30 seconds
     }
 
 
