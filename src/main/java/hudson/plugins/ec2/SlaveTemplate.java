@@ -715,10 +715,9 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
          * AmazonEC2#describeImageAttribute does not work due to a bug
          * https://forums.aws.amazon.com/message.jspa?messageID=231972
          */
-        for (final Image image : getParent().connect().describeImages().getImages()) {
-
+        DescribeImagesRequest request = new DescribeImagesRequest().withImageIds(ami);
+        for (final Image image : getParent().connect().describeImages(request).getImages()) {
             if (ami.equals(image.getImageId())) {
-
                 return image.getBlockDeviceMappings();
             }
         }
@@ -834,9 +833,11 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                 }
             }
             if (!hasCustomTypeTag) {
-                if (instTags != null)
-                    instTags.add(new Tag(EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE, EC2Cloud.getSlaveTypeTagValue(
-                            EC2Cloud.EC2_SLAVE_TYPE_SPOT, description)));
+                if (instTags == null) {
+                    instTags = new HashSet<Tag>();
+                }
+                instTags.add(new Tag(EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE, EC2Cloud.getSlaveTypeTagValue(
+                        EC2Cloud.EC2_SLAVE_TYPE_SPOT, description)));
             }
 
             if (StringUtils.isNotBlank(getIamInstanceProfile())) {

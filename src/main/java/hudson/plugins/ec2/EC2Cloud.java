@@ -337,8 +337,8 @@ public abstract class EC2Cloud extends Cloud {
     private int countCurrentEC2Slaves(SlaveTemplate template) throws AmazonClientException {
         LOGGER.log(Level.FINE, "Counting current slaves: " + (template != null ? (" AMI: " + template.getAmi() + ", description: " + template.description) : " All AMIS"));
         int n = 0;
+        Set<String> instanceIds = new HashSet<String>();
         String description = template != null ? template.description : null;
-        Set<String> instanceId = new HashSet();
 
         for (Reservation r : connect().describeInstances().getReservations()) {
             for (Instance i : r.getInstances()) {
@@ -349,7 +349,7 @@ public abstract class EC2Cloud extends Cloud {
                         LOGGER.log(Level.FINE, "Existing instance found: " + i.getInstanceId() + " AMI: " + i.getImageId()
                                 + " Template: " + description);
                         n++;
-                        instanceId.add(i.getInstanceId());
+                        instanceIds.add(i.getInstanceId());
                     }
                 }
             }
@@ -384,12 +384,13 @@ public abstract class EC2Cloud extends Cloud {
             for (SpotInstanceRequest sir : sirs) {
                 sirSet.add(sir);
                 if (sir.getState().equals("open") || sir.getState().equals("active")) {
-                    if (!instanceId.contains(sir.getInstanceId())) {
-                        LOGGER.log(Level.FINE, "Spot instance request found: " + sir.getSpotInstanceRequestId() + " AMI: "
-                                + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
-                        instanceId.add(sir.getInstanceId());
-                        n++;
-                    }
+                    if (instanceIds.contains(sir.getInstanceId()))
+                        continue;
+
+                    LOGGER.log(Level.FINE, "Spot instance request found: " + sir.getSpotInstanceRequestId() + " AMI: "
+                            + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
+                    n++;
+                    instanceIds.add(sir.getInstanceId());
                 } else {
                     // Canceled or otherwise dead
                     for (Node node : Jenkins.getInstance().getNodes()) {
@@ -422,6 +423,7 @@ public abstract class EC2Cloud extends Cloud {
             }
             EC2SpotSlave ec2Slave = (EC2SpotSlave) node;
             SpotInstanceRequest sir = ec2Slave.getSpotRequest();
+
             if (sir == null) {
                 LOGGER.log(Level.FINE, "Found spot node without request: " + ec2Slave.getSpotInstanceRequestId());
                 n++;
@@ -431,19 +433,20 @@ public abstract class EC2Cloud extends Cloud {
                 continue;
             }
             sirSet.add(sir);
+
             if (sir.getState().equals("open") || sir.getState().equals("active")) {
                 if (template != null) {
                     List<Tag> instanceTags = sir.getTags();
                     for (Tag tag : instanceTags) {
                         if (StringUtils.equals(tag.getKey(), EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE) && StringUtils.equals(tag.getValue(), getSlaveTypeTagValue(EC2_SLAVE_TYPE_SPOT, template.description)) && sir.getLaunchSpecification().getImageId().equals(template.getAmi())) {
+
+                            if (instanceIds.contains(sir.getInstanceId()))
+                                continue;
+
                             LOGGER.log(Level.FINE, "Spot instance request found (from node): " + sir.getSpotInstanceRequestId() + " AMI: "
                                     + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
-                            if (!instanceId.contains(sir.getInstanceId())) {
-                                LOGGER.log(Level.FINE, "Spot instance request found (from node): " + sir.getSpotInstanceRequestId() + " AMI: "
-                                        + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
-                                instanceId.add(sir.getInstanceId());
-                                n++;
-                            }
+                            n++;
+                            instanceIds.add(sir.getInstanceId());
                         }
                     }
                 } else {
