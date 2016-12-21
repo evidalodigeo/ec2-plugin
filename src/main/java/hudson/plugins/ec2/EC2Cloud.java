@@ -248,6 +248,10 @@ public abstract class EC2Cloud extends Cloud {
         }
     }
 
+    public String getTagKey() {
+        return EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE.concat("_").concat(EC2Tag.formatTagString(this.name));
+    }
+
     public List<SlaveTemplate> getTemplates() {
         return Collections.unmodifiableList(templates);
     }
@@ -363,10 +367,10 @@ public abstract class EC2Cloud extends Cloud {
             filters.add(new Filter("launch.image-id", values));
             values = new ArrayList<String>();
             values.add(getSlaveTypeTagValue(EC2_SLAVE_TYPE_SPOT, description));
-            filters.add(new Filter("tag:" + EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE, values));
+            filters.add(new Filter("tag:" + this.getTagKey(), values));
         } else {
             values = new ArrayList<String>();
-            values.add(EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE);
+            values.add(this.getTagKey());
             filters.add(new Filter("tag-key", values));
         }
 
@@ -438,7 +442,7 @@ public abstract class EC2Cloud extends Cloud {
                 if (template != null) {
                     List<Tag> instanceTags = sir.getTags();
                     for (Tag tag : instanceTags) {
-                        if (StringUtils.equals(tag.getKey(), EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE) && StringUtils.equals(tag.getValue(), getSlaveTypeTagValue(EC2_SLAVE_TYPE_SPOT, template.description)) && sir.getLaunchSpecification().getImageId().equals(template.getAmi())) {
+                        if (StringUtils.equals(tag.getKey(), this.getTagKey()) && StringUtils.equals(tag.getValue(), getSlaveTypeTagValue(EC2_SLAVE_TYPE_SPOT, template.description)) && sir.getLaunchSpecification().getImageId().equals(template.getAmi())) {
 
                             if (instanceIds.contains(sir.getInstanceId()))
                                 continue;
@@ -450,10 +454,10 @@ public abstract class EC2Cloud extends Cloud {
                         }
                     }
                 } else {
-                    if (!instanceId.contains(sir.getInstanceId())) {
+                    if (!instanceIds.contains(sir.getInstanceId())) {
                         LOGGER.log(Level.FINE, "Spot instance request found (from node): " + sir.getSpotInstanceRequestId() + " AMI: "
                                 + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
-                        instanceId.add(sir.getInstanceId());
+                        instanceIds.add(sir.getInstanceId());
                         n++;
                     }
                 }
@@ -465,7 +469,7 @@ public abstract class EC2Cloud extends Cloud {
 
     private boolean isEc2ProvisionedAmiSlave(List<Tag> tags, String description) {
         for (Tag tag : tags) {
-            if (StringUtils.equals(tag.getKey(), EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE)) {
+            if (StringUtils.equals(tag.getKey(), this.getTagKey())) {
                 if (description == null) {
                     return true;
                 } else if (StringUtils.equals(tag.getValue(), EC2Cloud.EC2_SLAVE_TYPE_DEMAND)

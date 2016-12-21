@@ -39,7 +39,7 @@ public class EC2Tag extends AbstractDescribableImpl<EC2Tag> {
     /**
      * Tag name for the specific jenkings slave type tag, used to identify the EC2 instances provisioned by this plugin.
      */
-    public static final String TAG_NAME_JENKINS_SLAVE_TYPE = "jenkins_slave_type_OF";
+    public static final String TAG_NAME_JENKINS_SLAVE_TYPE = "jenkins_slave_type";
 
     @DataBoundConstructor
     public EC2Tag(String name, String value) {
@@ -103,4 +103,9 @@ public class EC2Tag extends AbstractDescribableImpl<EC2Tag> {
 
         return result;
     }
+
+    public static String formatTagString(String tag) {
+        return tag.replaceAll("\\s+", "_");
+    }
+
 }

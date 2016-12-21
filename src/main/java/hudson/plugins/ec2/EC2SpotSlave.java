@@ -50,7 +50,7 @@ public final class EC2SpotSlave extends EC2AbstractSlave {
 
     @Override
     protected boolean isAlive(boolean force) {
-        return super.isAlive(force) || !this.isSpotRequestDead();
+        return super.isAlive(force) || !this.isSpotRequestDead(force);
     }
 
     /**
@@ -111,9 +111,14 @@ public final class EC2SpotSlave extends EC2AbstractSlave {
      *
      * @return SpotInstanceRequest object for this slave, or null
      */
-    public SpotInstanceRequest getSpotRequest() {
 
-        if (needSpotRequestRefresh()) {
+    SpotInstanceRequest getSpotRequest() {
+        return this.getSpotRequest(false);
+    }
+
+    SpotInstanceRequest getSpotRequest(boolean force) {
+
+        if (force || needSpotRequestRefresh()) {
             AmazonEC2 ec2 = getCloud().connect();
 
             DescribeSpotInstanceRequestsRequest dsirRequest = new DescribeSpotInstanceRequestsRequest().withSpotInstanceRequestIds(this.spotInstanceRequestId);
@@ -149,7 +154,11 @@ public final class EC2SpotSlave extends EC2AbstractSlave {
 
 
     public boolean isSpotRequestDead() {
-        SpotInstanceState requestState = SpotInstanceState.fromValue(this.getSpotRequest().getState());
+        return this.isSpotRequestDead(false);
+    }
+
+    public boolean isSpotRequestDead(boolean force) {
+        SpotInstanceState requestState = SpotInstanceState.fromValue(this.getSpotRequest(force).getState());
         return requestState == SpotInstanceState.Cancelled
                 || requestState == SpotInstanceState.Closed
                 || requestState == SpotInstanceState.Failed;

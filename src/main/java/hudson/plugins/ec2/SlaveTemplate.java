@@ -31,8 +31,6 @@ import com.amazonaws.services.ec2.model.DescribeInstancesRequest;
 import com.amazonaws.services.ec2.model.DescribeInstancesResult;
 import com.amazonaws.services.ec2.model.DescribeSecurityGroupsRequest;
 import com.amazonaws.services.ec2.model.DescribeSecurityGroupsResult;
-import com.amazonaws.services.ec2.model.DescribeSpotPriceHistoryRequest;
-import com.amazonaws.services.ec2.model.DescribeSpotPriceHistoryResult;
 import com.amazonaws.services.ec2.model.DescribeSubnetsRequest;
 import com.amazonaws.services.ec2.model.DescribeSubnetsResult;
 import com.amazonaws.services.ec2.model.Filter;
@@ -54,7 +52,6 @@ import com.amazonaws.services.ec2.model.SecurityGroup;
 import com.amazonaws.services.ec2.model.ShutdownBehavior;
 import com.amazonaws.services.ec2.model.SpotInstanceRequest;
 import com.amazonaws.services.ec2.model.SpotPlacement;
-import com.amazonaws.services.ec2.model.SpotPrice;
 import com.amazonaws.services.ec2.model.StartInstancesRequest;
 import com.amazonaws.services.ec2.model.StartInstancesResult;
 import com.amazonaws.services.ec2.model.Subnet;
@@ -89,7 +86,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Date;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -407,7 +403,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
         return iamInstanceProfile;
     }
 
-    enum ProvisionOptions { ALLOW_CREATE, FORCE_CREATE }
+    enum ProvisionOptions {ALLOW_CREATE, FORCE_CREATE}
 
     /**
      * Provisions a new EC2 slave or starts a previously stopped on-demand instance.
@@ -416,8 +412,17 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
      */
     public EC2AbstractSlave provision(TaskListener listener, Label requiredLabel, EnumSet<ProvisionOptions> provisionOptions) throws AmazonClientException, IOException {
         if (this.spotConfig != null) {
-            if (provisionOptions.contains(ProvisionOptions.ALLOW_CREATE) || provisionOptions.contains(ProvisionOptions.FORCE_CREATE))
-                return provisionSpot(listener);
+            if (provisionOptions.contains(ProvisionOptions.ALLOW_CREATE) || provisionOptions.contains(ProvisionOptions.FORCE_CREATE)) {
+
+                String currentSpotPrice = SpotConfiguration.getCurrentSpotPrice(getParent().connect(), this.zone, this.type, this.isUnixSlave());
+                if (SpotConfiguration.isCheaperBid(currentSpotPrice, this.spotConfig.spotMaxBidPrice)) {
+                    LOGGER.info("Creating spotInstance as bid is cheaper than currentPrice: " + currentSpotPrice + " < " + this.spotConfig.spotMaxBidPrice);
+                    return provisionSpot(listener);
+                } else {
+                    LOGGER.info("Creating onDemand as bid is more expensive than currentPrice: " + currentSpotPrice + " >= " + this.spotConfig.spotMaxBidPrice);
+                    return provisionOndemand(listener, requiredLabel, provisionOptions);
+                }
+            }
             return null;
         }
         return provisionOndemand(listener, requiredLabel, provisionOptions);
@@ -506,14 +511,14 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                 setupCustomDeviceMapping(riRequest);
             }
 
-            if(stopOnTerminate){
+            if (stopOnTerminate) {
                 riRequest.setInstanceInitiatedShutdownBehavior(ShutdownBehavior.Stop);
                 logProvisionInfo(logger, "Setting Instance Initiated Shutdown Behavior : ShutdownBehavior.Stop");
-            }else{
+            } else {
                 riRequest.setInstanceInitiatedShutdownBehavior(ShutdownBehavior.Terminate);
-                 logProvisionInfo(logger, "Setting Instance Initiated Shutdown Behavior : ShutdownBehavior.Terminate");
+                logProvisionInfo(logger, "Setting Instance Initiated Shutdown Behavior : ShutdownBehavior.Terminate");
             }
-            
+
             List<Filter> diFilters = new ArrayList<Filter>();
             diFilters.add(new Filter("image-id").withValues(ami));
 
@@ -579,7 +584,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                 for (EC2Tag t : tags) {
                     instTags.add(new Tag(t.getName(), t.getValue()));
                     diFilters.add(new Filter("tag:" + t.getName()).withValues(t.getValue()));
-                    if (StringUtils.equals(t.getName(), EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE)) {
+                    if (StringUtils.equals(t.getName(), this.getParent().getTagKey())) {
                         hasCustomTypeTag = true;
                     }
                 }
@@ -589,7 +594,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                     instTags = new HashSet<Tag>();
                 }
                 // Append template description as well to identify slaves provisioned per template
-                instTags.add(new Tag(EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE, EC2Cloud.getSlaveTypeTagValue(
+                instTags.add(new Tag(this.getParent().getTagKey(), EC2Cloud.getSlaveTypeTagValue(
                         EC2Cloud.EC2_SLAVE_TYPE_DEMAND, description)));
             }
 
@@ -827,7 +832,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                 instTags = new HashSet<Tag>();
                 for (EC2Tag t : tags) {
                     instTags.add(new Tag(t.getName(), t.getValue()));
-                    if (StringUtils.equals(t.getName(), EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE)) {
+                    if (StringUtils.equals(t.getName(), this.getParent().getTagKey())) {
                         hasCustomTypeTag = true;
                     }
                 }
@@ -836,7 +841,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                 if (instTags == null) {
                     instTags = new HashSet<Tag>();
                 }
-                instTags.add(new Tag(EC2Tag.TAG_NAME_JENKINS_SLAVE_TYPE, EC2Cloud.getSlaveTypeTagValue(
+                instTags.add(new Tag(this.getParent().getTagKey(), EC2Cloud.getSlaveTypeTagValue(
                         EC2Cloud.EC2_SLAVE_TYPE_SPOT, description)));
             }
 
@@ -1221,15 +1226,14 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             if (ec2 != null) {
 
                 try {
-                    // Build a new price history request with the currently
-                    // selected type
-                    DescribeSpotPriceHistoryRequest request = new DescribeSpotPriceHistoryRequest();
+
                     // If a zone is specified, set the availability zone in the
                     // request
                     // Else, proceed with no availability zone which will result
                     // with the cheapest Spot price
+                    String amZone = "";
                     if (getAvailabilityZones(ec2).contains(zone)) {
-                        request.setAvailabilityZone(zone);
+                        amZone = zone;
                         zoneStr = zone + " availability zone";
                     } else {
                         zoneStr = region + " region";
@@ -1257,20 +1261,8 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                         return FormValidation.error("Could not resolve instance type: " + type);
                     }
 
-                    Collection<String> instanceType = new ArrayList<String>();
-                    instanceType.add(ec2Type.toString());
-                    request.setInstanceTypes(instanceType);
-                    request.setStartTime(new Date());
 
-                    // Retrieve the price history request result and store the
-                    // current price
-                    DescribeSpotPriceHistoryResult result = ec2.describeSpotPriceHistory(request);
-
-                    if (!result.getSpotPriceHistory().isEmpty()) {
-                        SpotPrice currentPrice = result.getSpotPriceHistory().get(0);
-
-                        cp = currentPrice.getSpotPrice();
-                    }
+                    cp = SpotConfiguration.getCurrentSpotPrice(ec2, amZone, ec2Type, true);
 
                 } catch (AmazonServiceException e) {
                     return FormValidation.error(e.getMessage());
@@ -1285,7 +1277,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             } else {
                 cp = cp.substring(0, cp.length() - 3);
 
-                return FormValidation.ok("The current Spot price for a " + type + " in the " + zoneStr + " is $" + cp);
+                return FormValidation.ok("The current Spot price for a Unix" + type + " in the " + zoneStr + " is $" + cp);
             }
         }
     }
