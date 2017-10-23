@@ -39,10 +39,21 @@ import org.kohsuke.stapler.HttpResponse;
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.AmazonServiceException;
 import com.amazonaws.services.ec2.AmazonEC2;
+import com.amazonaws.services.ec2.model.DescribeInstanceStatusRequest;
 import com.amazonaws.services.ec2.model.DescribeInstancesRequest;
 import com.amazonaws.services.ec2.model.GetConsoleOutputRequest;
 import com.amazonaws.services.ec2.model.Reservation;
 import com.amazonaws.services.ec2.model.Instance;
+import com.amazonaws.services.ec2.model.InstanceStatus;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.Util;
+import hudson.model.Node;
+import hudson.slaves.SlaveComputer;
+import org.kohsuke.stapler.HttpRedirect;
+import org.kohsuke.stapler.HttpResponse;
+
+import java.io.IOException;
+import java.util.Collections;
 
 /**
  * @author Kohsuke Kawaguchi
@@ -55,6 +66,12 @@ public class EC2Computer extends SlaveComputer {
      * Cached description of this EC2 instance. Lazily fetched.
      */
     private volatile Instance ec2InstanceDescription;
+
+    /**
+     * Cached status details of this EC2 instance. Lazily fetched.
+     */
+    private volatile InstanceStatus ec2InstanceStatusDetails;
+
 
     public EC2Computer(EC2AbstractSlave slave) {
         super(slave);
@@ -125,13 +142,21 @@ public class EC2Computer extends SlaveComputer {
 
     /**
      * Gets the current state of the instance.
-     *
-     * <p>
+     * @param withChecksDetails Also validate Status Checks of ec2 Instance
+     * <p/>
+     * <p/>
      * Unlike {@link #describeInstance()}, this method always return the current status by calling EC2.
      */
-    public InstanceState getState() throws AmazonClientException, InterruptedException {
+    public InstanceStateDetails getState(boolean withChecksDetails) throws AmazonClientException, InterruptedException {
+        InstanceStateDetails instanceStatus;
         ec2InstanceDescription = _describeInstance();
-        return InstanceState.find(ec2InstanceDescription.getState().getName());
+        if (withChecksDetails) {
+            ec2InstanceStatusDetails = _describeInstanceStatus();
+            instanceStatus = new InstanceStateDetails(ec2InstanceStatusDetails);
+        } else {
+            instanceStatus = new InstanceStateDetails(ec2InstanceDescription.getState());
+        }
+        return instanceStatus;
     }
 
     /**
@@ -168,6 +193,28 @@ public class EC2Computer extends SlaveComputer {
         return _describeInstanceOnce();
     }
 
+    private InstanceStatus _describeInstanceStatus() throws AmazonClientException, InterruptedException {
+        // Sometimes even after a successful RunInstances, DescribeInstances
+        // returns an error for a few seconds. We do a few retries instead of
+        // failing instantly. See [JENKINS-15319].
+        for (int i = 0; i < 5; i++) {
+            try {
+                return _describeInstanceStatusOnce();
+            } catch (AmazonServiceException e) {
+                if (e.getErrorCode().equals("InvalidInstanceID.NotFound")) {
+                    // retry in 5 seconds.
+                    Thread.sleep(5000);
+                    continue;
+                }
+                throw e;
+            } catch (Exception e) {
+                Thread.sleep(5000);
+            }
+        }
+        // Last time, throw on any error.
+        return _describeInstanceStatusOnce();
+    }
+
     private Instance _describeInstanceOnce() throws AmazonClientException {
         DescribeInstancesRequest request = new DescribeInstancesRequest();
         String instanceId = getNode().getInstanceId();
@@ -196,14 +243,21 @@ public class EC2Computer extends SlaveComputer {
         return instances.get(0);
     }
 
+    private InstanceStatus _describeInstanceStatusOnce() throws AmazonClientException {
+        DescribeInstanceStatusRequest request = new DescribeInstanceStatusRequest();
+        request.setInstanceIds(Collections.<String>singletonList(getNode().getInstanceId()));
+        return getCloud().connect().describeInstanceStatus(request).getInstanceStatuses().get(0);
+    }
+
     /**
      * When the slave is deleted, terminate the instance.
      */
     @Override
     public HttpResponse doDoDelete() throws IOException {
         checkPermission(DELETE);
-        if (getNode() != null)
+        if (getNode() != null) {
             getNode().terminate();
+        }
         return new HttpRedirect("..");
     }
 

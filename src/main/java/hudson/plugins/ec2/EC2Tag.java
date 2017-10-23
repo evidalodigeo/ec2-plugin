@@ -23,15 +23,14 @@
  */
 package hudson.plugins.ec2;
 
-import hudson.model.Descriptor;
-import hudson.model.AbstractDescribableImpl;
+import com.amazonaws.services.ec2.model.Tag;
 import hudson.Extension;
+import hudson.model.AbstractDescribableImpl;
+import hudson.model.Descriptor;
 import org.kohsuke.stapler.DataBoundConstructor;
 
-import java.util.List;
 import java.util.LinkedList;
-
-import com.amazonaws.services.ec2.model.Tag;
+import java.util.List;
 
 public class EC2Tag extends AbstractDescribableImpl<EC2Tag> {
     private final String name;
@@ -104,4 +103,9 @@ public class EC2Tag extends AbstractDescribableImpl<EC2Tag> {
 
         return result;
     }
+
+    public static String formatTagString(String tag) {
+        return tag.replaceAll("\\s+", "_");
+    }
+
 }
