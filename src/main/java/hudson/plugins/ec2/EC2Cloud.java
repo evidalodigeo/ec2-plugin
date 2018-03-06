@@ -321,7 +321,16 @@ public abstract class EC2Cloud extends Cloud {
             EC2AbstractSlave node = getNewOrExistingAvailableSlave(t, null, true);
             if (node == null)
                 throw HttpResponses.error(SC_BAD_REQUEST, "Cloud or AMI instance cap would be exceeded for: " + template);
-            Jenkins.getInstance().addNode(node);
+            if(null == node.getTags() || node.getTags().isEmpty()){
+                LOGGER.log(Level.INFO, "doProvision.Tags don't empty . CloudName: " + node.cloudName + " InstanceId:" + node.getInstanceId()
+                        + " Description: " + node.getNodeDescription() + "Tags:" + node.getTags());
+            } else {
+                LOGGER.log(Level.INFO, "doProvision. CloudName: " + node.cloudName + " InstanceId:" + node.getInstanceId()
+                        + " Description: " + node.getNodeDescription() + "Tags:" + node.getTags());
+                Jenkins.getInstance().addNode(node);
+            }
+
+
 
             return HttpResponses.redirectViaContextPath("/computer/" + node.getNodeName());
         } catch (AmazonClientException e) {
@@ -392,8 +401,9 @@ public abstract class EC2Cloud extends Cloud {
                             + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
                     n++;
 
-                    if (sir.getInstanceId() != null)
+                    if (sir.getInstanceId() != null && existsTags(sir, "countCurrentEC2Slaves 1")) {
                         instanceIds.add(sir.getInstanceId());
+                    }
                 } else {
                     // Canceled or otherwise dead
                     for (Node node : Jenkins.getInstance().getNodes()) {
@@ -431,40 +441,47 @@ public abstract class EC2Cloud extends Cloud {
                 continue;
             }
 
-            if (sirSet.contains(sir))
+            if (sirSet.contains(sir)) {
                 continue;
+            }
+            if(existsTags(sir, "countCurrentEC2Slaves 2")) {
+                sirSet.add(sir);
+                if (sir.getState().equals("open") || sir.getState().equals("active")) {
+                    if (template != null) {
+                        List<Tag> instanceTags = sir.getTags();
+                        for (Tag tag : instanceTags) {
+                            if (StringUtils.equals(tag.getKey(), this.getTagKey()) && StringUtils.equals(tag.getValue(), getSlaveTypeTagValue(EC2_SLAVE_TYPE_SPOT, template.description)) && sir.getLaunchSpecification().getImageId().equals(template.getAmi())) {
 
-            sirSet.add(sir);
+                                if (sir.getInstanceId() != null && instanceIds.contains(sir.getInstanceId()))
+                                    continue;
 
-            if (sir.getState().equals("open") || sir.getState().equals("active")) {
-                if (template != null) {
-                    List<Tag> instanceTags = sir.getTags();
-                    for (Tag tag : instanceTags) {
-                        if (StringUtils.equals(tag.getKey(), this.getTagKey()) && StringUtils.equals(tag.getValue(), getSlaveTypeTagValue(EC2_SLAVE_TYPE_SPOT, template.description)) && sir.getLaunchSpecification().getImageId().equals(template.getAmi())) {
+                                LOGGER.log(Level.FINE, "Spot instance request found (from node): " + sir.getSpotInstanceRequestId() + " AMI: "
+                                        + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
+                                n++;
 
-                            if (sir.getInstanceId() != null && instanceIds.contains(sir.getInstanceId()))
-                                continue;
-                
+                                if (sir.getInstanceId() != null)
+                                    instanceIds.add(sir.getInstanceId());
+                            }
+                        }
+                    } else {
+                        if (!instanceIds.contains(sir.getInstanceId())) {
                             LOGGER.log(Level.FINE, "Spot instance request found (from node): " + sir.getSpotInstanceRequestId() + " AMI: "
                                     + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
+                            instanceIds.add(sir.getInstanceId());
                             n++;
-
-                            if (sir.getInstanceId() != null)
-                                instanceIds.add(sir.getInstanceId());
                         }
-                    }
-                } else {
-                    if (!instanceIds.contains(sir.getInstanceId())) {
-                        LOGGER.log(Level.FINE, "Spot instance request found (from node): " + sir.getSpotInstanceRequestId() + " AMI: "
-                                + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
-                        instanceIds.add(sir.getInstanceId());
-                        n++;
                     }
                 }
             }
         }
 
         return n;
+    }
+
+    private boolean existsTags(SpotInstanceRequest sir, String method) {
+        boolean exists = null == sir.getTags() || sir.getTags().isEmpty();
+        if(!exists) LOGGER.log(Level.FINE,method +"Tags don't exists. InstanceId : " + sir.getInstanceId() + " state: " + sir.getState() + " status: " + sir.getStatus());
+        return exists;
     }
 
     private boolean isEc2ProvisionedAmiSlave(List<Tag> tags, String description) {

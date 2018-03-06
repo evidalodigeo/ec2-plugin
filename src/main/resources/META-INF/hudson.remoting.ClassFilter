@@ -1,0 +1,6 @@
+com.amazonaws.services.ec2.model.LaunchSpecification
+com.amazonaws.services.ec2.model.SpotPlacement
+com.amazonaws.internal.SdkInternalList
+com.amazonaws.services.ec2.model.GroupIdentifier
+com.amazonaws.services.ec2.model.SpotInstanceStatus
+com.amazonaws.services.ec2.model.Tag
